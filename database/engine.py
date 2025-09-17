@@ -3,21 +3,29 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from database.models import Base
 from database.orm_query import orm_add_banner_description, orm_create_categories
-
 from common.texts_for_db import categories, description_for_info_pages
 
-# from .env file:
-# DB_LITE=sqlite+aiosqlite:///my_base.db
-# DB_URL=postgresql+asyncpg://login:password@localhost:5432/db_name
+# 🔑 Строка подключения берётся из .env
+# Пример в .env:
+# DB_URL=postgresql+asyncpg://user:password@localhost:5432/shopezakaz1
 
-engine = create_async_engine(os.getenv('DB_LITE'), echo=True)
+DATABASE_URL = os.getenv("DB_URL")
+if not DATABASE_URL:
+    raise ValueError("❌ DB_URL is not set in .env")
 
-# engine = create_async_engine(os.getenv('DB_URL'), echo=True)
+# ⚡️ Создаём движок PostgreSQL
+engine = create_async_engine(DATABASE_URL, echo=False, future=True)
 
-session_maker = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+# ⚡️ Session factory
+session_maker = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
 
 async def create_db():
+    """Создаёт все таблицы и наполняет начальными данными."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -27,5 +35,6 @@ async def create_db():
 
 
 async def drop_db():
+    """Удаляет все таблицы."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
