@@ -151,18 +151,30 @@ async def orm_delete_product(session: AsyncSession, product_id: int):
 
 ##################### Добавляем юзера в БД #####################################
 
+async def orm_get_user(session: AsyncSession, user_id: int) -> User | None:
+    query = select(User).where(User.user_id == user_id)
+    result = await session.execute(query)
+    return result.scalar_one_or_none()
+
+
 async def orm_add_user(
     session: AsyncSession,
     user_id: int,
     first_name: str | None = None,
     last_name: str | None = None,
     phone: str | None = None,
+    is_admin: bool = False,
 ):
-    query = select(User).where(User.user_id == user_id)
-    result = await session.execute(query)
-    if result.first() is None:
+    user = await orm_get_user(session, user_id)
+    if user is None:
         session.add(
-            User(user_id=user_id, first_name=first_name, last_name=last_name, phone=phone)
+            User(
+                user_id=user_id,
+                first_name=first_name,
+                last_name=last_name,
+                phone=phone,
+                is_admin=is_admin,
+            )
         )
         await session.commit()
 
