@@ -1,4 +1,5 @@
 from aiogram import F, Router, types
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter, or_f
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -43,8 +44,24 @@ def get_admin_main_keyboard() -> types.InlineKeyboardMarkup:
     return get_callback_btns(btns=ADMIN_MAIN_BTNS, sizes=(2, 2))
 
 
+async def edit_or_send_message(
+    message: types.Message,
+    text: str,
+    reply_markup: types.InlineKeyboardMarkup | None = None,
+) -> types.Message:
+    if reply_markup is None or isinstance(reply_markup, types.InlineKeyboardMarkup):
+        try:
+            return await message.edit_text(text, reply_markup=reply_markup)
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e).lower():
+                return message
+    return await message.answer(text, reply_markup=reply_markup)
+
+
 async def send_admin_menu(message: types.Message) -> None:
-    await message.answer("Что хотите сделать?", reply_markup=get_admin_main_keyboard())
+    await edit_or_send_message(
+        message, "Что хотите сделать?", reply_markup=get_admin_main_keyboard()
+    )
 
 # Хендлер для выхода из админ-панели
 @admin_router.message(Command("exit_admin"), IsAdmin())
@@ -69,7 +86,11 @@ async def show_categories(callback: types.CallbackQuery, session: AsyncSession):
     categories = await orm_get_categories(session)
     btns = {category.name: f'category_{category.id}' for category in categories}
     btns["⬅️ Админ меню"] = "admin_menu"
-    await callback.message.answer("Выберите категорию", reply_markup=get_callback_btns(btns=btns))
+    await edit_or_send_message(
+        callback.message,
+        "Выберите категорию",
+        reply_markup=get_callback_btns(btns=btns),
+    )
     await callback.answer()
 
 
@@ -90,8 +111,10 @@ async def starring_at_product(callback: types.CallbackQuery, session: AsyncSessi
             ),
         )
     await callback.answer()
-    await callback.message.answer(
-        "ОК, вот список товаров ⏫", reply_markup=get_admin_main_keyboard()
+    await edit_or_send_message(
+        callback.message,
+        "ОК, вот список товаров ⏫",
+        reply_markup=get_admin_main_keyboard(),
     )
 
 
@@ -101,7 +124,11 @@ async def delete_product_callback(callback: types.CallbackQuery, session: AsyncS
     await orm_delete_product(session, int(product_id))
 
     await callback.answer("Товар удален")
-    await callback.message.answer("Товар удален!", reply_markup=get_admin_main_keyboard())
+    await edit_or_send_message(
+        callback.message,
+        "Товар удален!",
+        reply_markup=get_admin_main_keyboard(),
+    )
 
 
 ################# Микро FSM для загрузки/изменения баннеров ############################
@@ -113,8 +140,9 @@ class AddBanner(StatesGroup):
 @admin_router.callback_query(StateFilter(None), F.data == 'admin_banner')
 async def prompt_banner_upload(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     pages_names = [page.name for page in await orm_get_info_pages(session)]
-    await callback.message.answer(
-        f"Отправьте фото баннера.\nВ описании укажите для какой страницы:\n{', '.join(pages_names)}"
+    await edit_or_send_message(
+        callback.message,
+        f"Отправьте фото баннера.\nВ описании укажите для какой страницы:\n{', '.join(pages_names)}",
     )
     await state.set_state(AddBanner.image)
     await callback.answer()
@@ -171,9 +199,9 @@ class CategoryDelete(StatesGroup):
 
 @admin_router.callback_query(StateFilter(None), F.data == "admin_add_category")
 async def start_category_add(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer(
+    await edit_or_send_message(
+        callback.message,
         "Введите название новой категории",
-        reply_markup=types.ReplyKeyboardRemove(),
     )
     await state.set_state(CategoryAdd.name)
     await callback.answer()
@@ -217,7 +245,8 @@ async def start_category_rename(
 ):
     categories = await orm_get_categories(session)
     if not categories:
-        await callback.message.answer(
+        await edit_or_send_message(
+            callback.message,
             "Категории отсутствуют. Добавьте новую категорию.",
             reply_markup=get_admin_main_keyboard(),
         )
@@ -226,7 +255,8 @@ async def start_category_rename(
 
     btns = {category.name: f"admin_rename_category_{category.id}" for category in categories}
     btns["⬅️ Админ меню"] = "admin_menu"
-    await callback.message.answer(
+    await edit_or_send_message(
+        callback.message,
         "Выберите категорию для переименования",
         reply_markup=get_callback_btns(btns=btns),
     )
@@ -246,11 +276,10 @@ async def choose_category_for_rename(
         await callback.answer("Категория не найдена.", show_alert=True)
         return
 
-    await callback.message.edit_reply_markup()
     await state.update_data(category_id=category_id, old_name=category.name)
-    await callback.message.answer(
+    await edit_or_send_message(
+        callback.message,
         f'Введите новое название для категории "{category.name}"',
-        reply_markup=types.ReplyKeyboardRemove(),
     )
     await state.set_state(CategoryRename.name)
     await callback.answer()
@@ -319,7 +348,8 @@ async def start_category_delete(
 ):
     categories = await orm_get_categories(session)
     if not categories:
-        await callback.message.answer(
+        await edit_or_send_message(
+            callback.message,
             "Категории отсутствуют. Добавлять пока нечего удалять.",
             reply_markup=get_admin_main_keyboard(),
         )
@@ -328,7 +358,8 @@ async def start_category_delete(
 
     btns = {category.name: f"admin_delete_category_{category.id}" for category in categories}
     btns["⬅️ Админ меню"] = "admin_menu"
-    await callback.message.answer(
+    await edit_or_send_message(
+        callback.message,
         "Выберите категорию для удаления",
         reply_markup=get_callback_btns(btns=btns),
     )
@@ -348,18 +379,19 @@ async def process_category_delete(
         await callback.answer("Категория не найдена.", show_alert=True)
         return
 
-    await callback.message.edit_reply_markup()
     deleted = await orm_delete_category(session, category_id)
 
     if deleted:
         await callback.answer("Категория удалена")
-        await callback.message.answer(
+        await edit_or_send_message(
+            callback.message,
             f'Категория "{category.name}" удалена.',
             reply_markup=get_admin_main_keyboard(),
         )
     else:
         await callback.answer("Не удалось удалить категорию", show_alert=True)
-        await callback.message.answer(
+        await edit_or_send_message(
+            callback.message,
             "Не удалось удалить категорию. Попробуйте позже.",
             reply_markup=get_admin_main_keyboard(),
         )
@@ -409,9 +441,7 @@ async def change_product_callback(
 
 # Становимся в состояние ожидания ввода name
 async def prompt_product_name(message: types.Message, state: FSMContext) -> None:
-    await message.answer(
-        "Введите название товара", reply_markup=types.ReplyKeyboardRemove()
-    )
+    await edit_or_send_message(message, "Введите название товара")
     await state.set_state(AddProduct.name)
 
 
@@ -509,11 +539,10 @@ async def category_choice(callback: types.CallbackQuery, state: FSMContext , ses
     if int(callback.data) in [category.id for category in await orm_get_categories(session)]:
         await callback.answer()
         await state.update_data(category=callback.data)
-        await callback.message.answer('Теперь введите цену товара.')
+        await edit_or_send_message(callback.message, 'Теперь введите цену товара.')
         await state.set_state(AddProduct.price)
     else:
-        await callback.message.answer('Выберите катеорию из кнопок.')
-        await callback.answer()
+        await callback.answer('Выберите категорию из кнопок.', show_alert=True)
 
 #Ловим любые некорректные действия, кроме нажатия на кнопку выбора категории
 @admin_router.message(AddProduct.category)
