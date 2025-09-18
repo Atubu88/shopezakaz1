@@ -102,6 +102,31 @@ async def orm_create_categories(session: AsyncSession, categories: list):
     session.add_all([Category(name=name) for name in categories])
     await session.commit()
 
+
+async def orm_add_category(session: AsyncSession, name: str) -> Category:
+    category = Category(name=name)
+    session.add(category)
+    await session.commit()
+    await session.refresh(category)
+    return category
+
+
+async def orm_update_category(session: AsyncSession, category_id: int, name: str) -> bool:
+    query = (
+        update(Category)
+        .where(Category.id == category_id)
+        .values(name=name)
+    )
+    result = await session.execute(query)
+    await session.commit()
+    return result.rowcount > 0
+
+
+async def orm_delete_category(session: AsyncSession, category_id: int) -> bool:
+    result = await session.execute(delete(Category).where(Category.id == category_id))
+    await session.commit()
+    return result.rowcount > 0
+
 ############ Админка: добавить/изменить/удалить товар ########################
 
 async def orm_add_product(session: AsyncSession, data: dict):
