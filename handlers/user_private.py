@@ -19,6 +19,14 @@ user_private_router.message.filter(ChatTypeFilter(["private"]))
 
 @user_private_router.message(CommandStart())
 async def start_cmd(message: types.Message, session: AsyncSession):
+    user = message.from_user
+    await orm_add_user(
+        session,
+        user_id=user.id,
+        first_name=user.first_name,
+        last_name=user.last_name,
+    )
+
     media, reply_markup = await get_menu_content(session, level=0, menu_name="main")
 
     await message.answer_photo(media.media, caption=media.caption, reply_markup=reply_markup)

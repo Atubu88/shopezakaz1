@@ -1,5 +1,9 @@
 from aiogram.filters import Filter
-from aiogram import Bot, types
+from aiogram import types
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from database.orm_query import orm_get_user
 
 
 class ChatTypeFilter(Filter):
@@ -11,8 +15,6 @@ class ChatTypeFilter(Filter):
 
 
 class IsAdmin(Filter):
-    def __init__(self) -> None:
-        pass
-
-    async def __call__(self, message: types.Message, bot: Bot) -> bool:
-        return message.from_user.id in bot.my_admins_list
+    async def __call__(self, message: types.Message, session: AsyncSession) -> bool:
+        user = await orm_get_user(session, message.from_user.id)
+        return bool(user and user.is_admin)

@@ -1,4 +1,4 @@
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, BigInteger, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text, BigInteger, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -44,6 +44,7 @@ class User(Base):
     first_name: Mapped[str] = mapped_column(String(150), nullable=True)
     last_name: Mapped[str]  = mapped_column(String(150), nullable=True)
     phone: Mapped[str]  = mapped_column(String(13), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class Cart(Base):
