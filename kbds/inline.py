@@ -142,10 +142,19 @@ def get_user_cart(
         return keyboard.adjust(*sizes).as_markup()
 
 
-def get_callback_btns(*, btns: dict[str, str], sizes: tuple[int] = (2,)):
+def get_callback_btns(*, btns: dict[str, str], sizes: tuple[int, ...] = (2,)):
     keyboard = InlineKeyboardBuilder()
 
     for text, data in btns.items():
         keyboard.add(InlineKeyboardButton(text=text, callback_data=data))
 
-    return keyboard.adjust(*sizes).as_markup()
+    total_btns = len(btns)
+    row_sizes = list(sizes) if sizes else []
+
+    if not row_sizes:
+        row_sizes.append(total_btns or 1)
+
+    if total_btns and sum(row_sizes) < total_btns:
+        row_sizes.append(total_btns - sum(row_sizes))
+
+    return keyboard.adjust(*row_sizes).as_markup()
