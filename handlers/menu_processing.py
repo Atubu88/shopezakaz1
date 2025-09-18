@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.orm_query import (
     orm_add_to_cart,
@@ -19,20 +19,65 @@ from utils.paginator import Paginator
 from aiogram.types import InputMediaPhoto, FSInputFile
 
 
+BANNERS_DIR = Path(__file__).resolve().parents[1] / "banners"
+DEFAULT_BANNER_FILE = BANNERS_DIR / "default.jpg"
+BANNER_FILE_MAP = {
+    "main": BANNERS_DIR / "main.jpg",
+    "catalog": BANNERS_DIR / "catalog.jpg",
+    "cart": BANNERS_DIR / "cart.jpg",
+    "about": BANNERS_DIR / "about.jpg",
+    "payment": BANNERS_DIR / "payment.jpg",
+    "shipping": BANNERS_DIR / "shipping.jpg",
+}
+
+IMAGE_NOT_FOUND_TEXT = "Изображение не найдено или путь некорректен"
+
+
+def resolve_banner_path(name: str) -> Path | None:
+    normalized = name.lower()
+    candidate = BANNER_FILE_MAP.get(normalized)
+    if candidate and candidate.exists():
+        return candidate
+
+    dynamic_candidate = BANNERS_DIR / f"{normalized}.jpg"
+    if dynamic_candidate.exists():
+        return dynamic_candidate
+
+    if DEFAULT_BANNER_FILE.exists():
+        return DEFAULT_BANNER_FILE
+
+    return None
+
+
+def get_banner_media_source(banner, name: str):
+    local_path = resolve_banner_path(name)
+    if local_path:
+        return FSInputFile(str(local_path))
+
+    if banner and getattr(banner, "image", None):
+        stored_path = Path(str(banner.image))
+        if stored_path.exists():
+            return FSInputFile(str(stored_path))
+        return banner.image
+
+    raise FileNotFoundError(f"No banner image available for '{name}'.")
+
+
 async def main_menu(session, level, menu_name):
-    # Получаем баннер из базы данных
     banner = await orm_get_banner(session, menu_name)
+    caption = banner.description if banner and banner.description else ""
 
-    # Убедимся, что путь к изображению указан правильно
-    if banner.image and os.path.exists(banner.image):
-        # Создаем объект InputMediaPhoto с использованием FSInputFile
-        image = InputMediaPhoto(media=FSInputFile(banner.image), caption=banner.description)
-    else:
-        # Если путь к изображению не указан или неверен, используем изображение по умолчанию
-        image = InputMediaPhoto(media=FSInputFile("banners/default.jpg"),
-                                caption="Изображение не найдено или путь некорректен")
+    try:
+        media_source = get_banner_media_source(banner, menu_name)
+    except FileNotFoundError:
+        if not DEFAULT_BANNER_FILE.exists():
+            raise
+        media_source = FSInputFile(str(DEFAULT_BANNER_FILE))
+        if not caption:
+            caption = IMAGE_NOT_FOUND_TEXT
 
-    # Получаем клавиатуру для главного меню
+    image = InputMediaPhoto(media=media_source, caption=caption)
+
     kbds = get_user_main_btns(level=level)
 
     return image, kbds
@@ -40,14 +85,18 @@ async def main_menu(session, level, menu_name):
 
 async def catalog(session, level, menu_name):
     banner = await orm_get_banner(session, menu_name)
+    caption = banner.description if banner and banner.description else ""
 
-    # Проверяем, что изображение существует и доступно по указанному пути
-    if banner.image and os.path.exists(banner.image):
-        # Используем FSInputFile для отправки локального файла
-        image = InputMediaPhoto(media=FSInputFile(banner.image), caption=banner.description)
-    else:
-        # В случае отсутствия изображения используем изображение по умолчанию
-        image = InputMediaPhoto(media=FSInputFile("banners/default.jpg"), caption="Изображение не найдено или путь некорректен")
+    try:
+        media_source = get_banner_media_source(banner, menu_name)
+    except FileNotFoundError:
+        if not DEFAULT_BANNER_FILE.exists():
+            raise
+        media_source = FSInputFile(str(DEFAULT_BANNER_FILE))
+        if not caption:
+            caption = IMAGE_NOT_FOUND_TEXT
+
+    image = InputMediaPhoto(media=media_source, caption=caption)
 
     categories = await orm_get_categories(session)
     kbds = get_user_catalog_btns(level=level, categories=categories)
@@ -107,9 +156,23 @@ async def carts(session, level, menu_name, page, user_id, product_id):
 
     if not carts:
         banner = await orm_get_banner(session, "cart")
-        image = InputMediaPhoto(
-            media=banner.image, caption=f"<strong>{banner.description}</strong>"
+        description_text = banner.description if banner and banner.description else None
+        caption = (
+            f"<strong>{description_text}</strong>"
+            if description_text
+            else f"<strong>{IMAGE_NOT_FOUND_TEXT}</strong>"
         )
+
+        try:
+            media_source = get_banner_media_source(banner, "cart")
+        except FileNotFoundError:
+            if not DEFAULT_BANNER_FILE.exists():
+                raise
+            media_source = FSInputFile(str(DEFAULT_BANNER_FILE))
+            if not description_text:
+                caption = f"<strong>{IMAGE_NOT_FOUND_TEXT}</strong>"
+
+        image = InputMediaPhoto(media=media_source, caption=caption)
 
         kbds = get_user_cart(
             level=level,
