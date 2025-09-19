@@ -10,6 +10,8 @@ from database.orm_query import (
     orm_reduce_product_in_cart,
 )
 from kbds.inline import (
+    MenuCallBack,
+    get_callback_btns,
     get_products_btns,
     get_user_cart,
     get_user_catalog_btns,
@@ -104,8 +106,28 @@ def pages(paginator: Paginator):
 
 async def products(session, level, category, page):
     products = await orm_get_products(session, category_id=category)
-    paginator = Paginator(products, page=page)
-    product = paginator.get_page()[0]
+    current_page = page or 1
+    paginator = Paginator(products, page=current_page)
+
+    if paginator.page < 1:
+        paginator.page = 1
+    if paginator.pages and paginator.page > paginator.pages:
+        paginator.page = paginator.pages
+
+    page_items = paginator.get_page()
+
+    if not page_items:
+        image = await build_banner_image(session, "catalog")
+        image.caption = "товары отсутствуют"
+        kbds = get_callback_btns(
+            btns={
+                "Назад": MenuCallBack(level=level - 1, menu_name="catalog").pack(),
+            },
+            sizes=(1,),
+        )
+        return image, kbds
+
+    product = page_items[0]
 
     image = InputMediaPhoto(
         media=product.image,
@@ -121,7 +143,7 @@ async def products(session, level, category, page):
     kbds = get_products_btns(
         level=level,
         category=category,
-        page=page,
+        page=paginator.page,
         pagination_btns=pagination_btns,
         product_id=product.id,
     )
