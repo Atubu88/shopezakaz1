@@ -171,15 +171,26 @@ def pretty_phone_number(phone: str) -> str:
 async def cleanup_contact_state(
     bot: Bot, chat_id: int, data: dict
 ) -> None:
+    # Удаляем сообщение с просьбой отправить контакт, если оно есть
     prompt_id = data.get("contact_prompt_message_id")
     if prompt_id:
         with suppress(TelegramBadRequest):
             await bot.delete_message(chat_id, prompt_id)
 
+    # Убираем клавиатуру, если она активна
     if data.get("contact_keyboard_active"):
-        removal = await bot.send_message(chat_id, " ", reply_markup=ReplyKeyboardRemove())
-        with suppress(TelegramBadRequest):
-            await bot.delete_message(chat_id, removal.message_id)
+        try:
+            removal = await bot.send_message(
+                chat_id,
+                ".",  # минимальный текст, чтобы Telegram принял
+                reply_markup=ReplyKeyboardRemove()
+            )
+            with suppress(TelegramBadRequest):
+                await bot.delete_message(chat_id, removal.message_id)
+        except TelegramBadRequest:
+            pass
+
+
 
 
 async def edit_order_message(
