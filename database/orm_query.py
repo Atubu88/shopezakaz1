@@ -1,9 +1,10 @@
 import math
+from decimal import Decimal
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from database.models import Banner, Cart, Category, Product, User
+from database.models import Banner, Cart, Category, Order, OrderItem, Product, User
 
 # Простой пагинатор
 class Paginator:
@@ -247,5 +248,51 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
         await orm_delete_from_cart(session, user_id, product_id)
         await session.commit()
         return False
+
+
+async def orm_create_order_from_state(
+    session: AsyncSession,
+    user_id: int,
+    state_data: dict,
+) -> Order | None:
+    """Создать заказ и очистить корзину пользователя."""
+
+    carts = await orm_get_user_carts(session, user_id)
+    if not carts:
+        return None
+
+    total = Decimal("0")
+    for cart in carts:
+        price = Decimal(str(cart.product.price))
+        total += price * cart.quantity
+
+    phone = state_data.get("phone_normalized") or state_data.get("phone")
+
+    order = Order(
+        user_id=user_id,
+        full_name=state_data.get("full_name", ""),
+        postal_code=state_data.get("postal_code", ""),
+        phone=phone or "",
+        total_amount=total,
+        status=state_data.get("status", "new"),
+    )
+
+    order.items = [
+        OrderItem(
+            product_id=cart.product_id,
+            price=Decimal(str(cart.product.price)),
+            quantity=cart.quantity,
+        )
+        for cart in carts
+    ]
+
+    session.add(order)
+    await session.flush()
+
+    await session.execute(delete(Cart).where(Cart.user_id == user_id))
+    await session.commit()
+    await session.refresh(order)
+
+    return order
 
 

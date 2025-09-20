@@ -17,7 +17,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.orm_query import orm_get_user_carts
+from database.orm_query import orm_create_order_from_state, orm_get_user_carts
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content
 from kbds.inline import MenuCallBack
@@ -667,9 +667,23 @@ async def process_manual_phone(message: types.Message, state: FSMContext):
 
 
 @order_router.callback_query(OrderState.confirm, F.data == "order_submit")
-async def submit_order(callback: types.CallbackQuery, state: FSMContext):
+async def submit_order(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
     data = await state.get_data()
     chat_id, message_id = await get_message_context(state)
+
+    order = await orm_create_order_from_state(
+        session,
+        callback.from_user.id,
+        data,
+    )
+
+    if order is None:
+        await callback.answer("Не удалось оформить заказ: корзина пуста.", show_alert=True)
+        return
 
     text = completion_text(data)
 
