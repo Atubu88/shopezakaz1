@@ -353,7 +353,37 @@ async def return_to_cart(
         user_id=callback.from_user.id,
     )
 
-    await callback.message.edit_media(media=media, reply_markup=reply_markup)
+    async def edit_cart_as_text() -> None:
+        caption = getattr(media, "caption", None)
+        if caption:
+            try:
+                await callback.message.edit_text(caption, reply_markup=reply_markup)
+            except TelegramBadRequest as error:
+                if "message is not modified" not in str(error).lower():
+                    raise
+        else:
+            try:
+                await callback.message.edit_reply_markup(reply_markup=reply_markup)
+            except TelegramBadRequest as error:
+                if "message is not modified" not in str(error).lower():
+                    raise
+
+    if callback.message.text is not None:
+        await edit_cart_as_text()
+    else:
+        try:
+            await callback.message.edit_media(media=media, reply_markup=reply_markup)
+        except TelegramBadRequest as error:
+            lower_error = str(error).lower()
+            if "message is not modified" in lower_error:
+                pass
+            elif (
+                "message content type is not supported" in lower_error
+                or "caption is too long" in lower_error
+            ):
+                await edit_cart_as_text()
+            else:
+                raise
     await callback.answer("Возврат в корзину")
 
 
