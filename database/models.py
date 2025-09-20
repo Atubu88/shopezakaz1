@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text, BigInteger, func
+from __future__ import annotations
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text, BigInteger, Integer, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -47,6 +49,28 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+class Order(Base):
+    __tablename__ = 'order'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey('user.user_id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    postal_code: Mapped[str] = mapped_column(String(12), nullable=False)
+    phone: Mapped[str] = mapped_column(String(32), nullable=False)
+    total_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default='new')
+
+    user: Mapped['User'] = relationship(backref='orders')
+    items: Mapped[list['OrderItem']] = relationship(
+        back_populates='order',
+        cascade='all, delete-orphan',
+    )
+
+
 class Cart(Base):
     __tablename__ = 'cart'
 
@@ -57,3 +81,16 @@ class Cart(Base):
 
     user: Mapped['User'] = relationship(backref='cart')
     product: Mapped['Product'] = relationship(backref='cart')
+
+
+class OrderItem(Base):
+    __tablename__ = 'order_item'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey('order.id', ondelete='CASCADE'), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey('product.id', ondelete='SET NULL'), nullable=True)
+    price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    order: Mapped['Order'] = relationship(back_populates='items')
+    product: Mapped['Product'] = relationship(backref='order_items')

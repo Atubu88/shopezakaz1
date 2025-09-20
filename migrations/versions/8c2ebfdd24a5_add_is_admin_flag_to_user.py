@@ -23,7 +23,9 @@ def upgrade() -> None:
         'user',
         sa.Column('is_admin', sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    op.alter_column('user', 'is_admin', server_default=None)
+    bind = op.get_bind()
+    if bind.dialect.name != 'sqlite':
+        op.alter_column('user', 'is_admin', server_default=None)
 
 
 def downgrade() -> None:
