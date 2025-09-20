@@ -74,6 +74,17 @@ def build_cart_block(lines: list[str]) -> str:
     return "\n".join(f"• {line}" for line in lines)
 
 
+def build_review_text(cart_lines: list[str], total_text: str) -> str:
+    cart_text = build_cart_block(cart_lines)
+    return (
+        "<strong>Оформление заказа</strong>\n\n"
+        "Проверьте содержимое корзины перед оформлением.\n\n"
+        f"<strong>Корзина:</strong>\n{cart_text}\n\n"
+        f"<strong>Итого:</strong> {total_text}$\n\n"
+        "Нажмите «Подтвердить», чтобы продолжить, или «Назад», чтобы вернуться."
+    )
+
+
 def get_confirmation_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Подтвердить", callback_data="order_confirm")
@@ -82,9 +93,9 @@ def get_confirmation_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_back_keyboard() -> InlineKeyboardMarkup:
+def get_back_keyboard(callback_data: str = "order_back_to_cart") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Назад", callback_data="order_back_to_cart")
+    builder.button(text="Назад", callback_data=callback_data)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -92,7 +103,7 @@ def get_back_keyboard() -> InlineKeyboardMarkup:
 def get_final_review_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Отправить заказ", callback_data="order_submit")
-    builder.button(text="Назад", callback_data="order_back_to_cart")
+    builder.button(text="Назад", callback_data="order_back_to_phone")
     builder.button(
         text="На главную 🏠",
         callback_data=MenuCallBack(level=0, menu_name="main").pack(),
@@ -232,9 +243,9 @@ def order_summary_text(data: dict) -> str:
     cart_lines: list[str] = data.get("cart_lines", [])
     cart_block = build_cart_block(cart_lines)
     total = data.get("cart_total", "0")
-    full_name = data.get("full_name", "—")
-    postal_code = data.get("postal_code", "—")
-    phone = data.get("phone", "—")
+    full_name = data.get("full_name") or "—"
+    postal_code = data.get("postal_code") or "—"
+    phone = data.get("phone") or "—"
 
     return (
         "<strong>Проверьте данные заказа</strong>\n\n"
@@ -282,15 +293,8 @@ async def start_order(
         return
 
     cart_lines, total = build_cart_summary(carts)
-    cart_text = build_cart_block(cart_lines)
     total_text = format_money(total)
-    caption = (
-        "<strong>Оформление заказа</strong>\n\n"
-        "Проверьте содержимое корзины перед оформлением.\n\n"
-        f"<strong>Корзина:</strong>\n{cart_text}\n\n"
-        f"<strong>Итого:</strong> {total_text}$\n\n"
-        "Нажмите «Подтвердить», чтобы продолжить, или «Назад», чтобы вернуться."
-    )
+    caption = build_review_text(cart_lines, total_text)
 
     await edit_order_message(
         callback.message.bot,
@@ -325,10 +329,40 @@ async def confirm_cart(callback: types.CallbackQuery, state: FSMContext):
         chat_id,
         message_id,
         text,
-        get_back_keyboard(),
+        get_back_keyboard("order_back_to_review"),
     )
 
     await state.set_state(OrderState.waiting_full_name)
+    await callback.answer()
+
+
+@order_router.callback_query(OrderState.waiting_full_name, F.data == "order_back_to_review")
+async def back_to_review(callback: types.CallbackQuery, state: FSMContext):
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer()
+        return
+
+    chat_id, message_id = await get_message_context(state)
+    data = await state.get_data()
+    cart_lines = data.get("cart_lines", [])
+    total_text = data.get("cart_total", "0")
+    caption = build_review_text(cart_lines, total_text)
+
+    await edit_order_message(
+        callback.message.bot,
+        chat_id,
+        message_id,
+        caption,
+        get_confirmation_keyboard(),
+    )
+
+    await state.set_state(OrderState.review)
+    await state.update_data(
+        full_name=None,
+        postal_code=None,
+        phone=None,
+        phone_normalized=None,
+    )
     await callback.answer()
 
 
@@ -387,6 +421,102 @@ async def return_to_cart(
     await callback.answer("Возврат в корзину")
 
 
+@order_router.callback_query(OrderState.waiting_postal_code, F.data == "order_back_to_full_name")
+async def back_to_full_name(callback: types.CallbackQuery, state: FSMContext):
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer()
+        return
+
+    chat_id, message_id = await get_message_context(state)
+    await edit_order_message(
+        callback.message.bot,
+        chat_id,
+        message_id,
+        (
+            "<strong>Шаг 1 из 3</strong>\n\n"
+            "Введите ФИО получателя.\n"
+            "Например: Иванов Иван Иванович."
+        ),
+        get_back_keyboard("order_back_to_review"),
+    )
+
+    await state.set_state(OrderState.waiting_full_name)
+    await state.update_data(
+        postal_code=None,
+        phone=None,
+        phone_normalized=None,
+    )
+    await callback.answer()
+
+
+@order_router.callback_query(OrderState.waiting_phone, F.data == "order_back_to_postal_code")
+async def back_to_postal_code(callback: types.CallbackQuery, state: FSMContext):
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    await cleanup_contact_state(callback.message.bot, callback.message.chat.id, data)
+    await state.update_data(
+        contact_keyboard_active=False,
+        contact_prompt_message_id=None,
+        phone=None,
+        phone_normalized=None,
+    )
+
+    chat_id, message_id = await get_message_context(state)
+    await edit_order_message(
+        callback.message.bot,
+        chat_id,
+        message_id,
+        (
+            "<strong>Шаг 2 из 3</strong>\n\n"
+            "Введите почтовый индекс (5–6 цифр)."
+        ),
+        get_back_keyboard("order_back_to_full_name"),
+    )
+
+    await state.set_state(OrderState.waiting_postal_code)
+    await callback.answer()
+
+
+@order_router.callback_query(OrderState.confirm, F.data == "order_back_to_phone")
+async def back_to_phone(callback: types.CallbackQuery, state: FSMContext):
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    await cleanup_contact_state(callback.message.bot, callback.message.chat.id, data)
+
+    chat_id, message_id = await get_message_context(state)
+    await edit_order_message(
+        callback.message.bot,
+        chat_id,
+        message_id,
+        (
+            "<strong>Шаг 3 из 3</strong>\n\n"
+            "Отправьте номер телефона.\n"
+            "Вы можете поделиться контактом кнопкой ниже или ввести номер вручную."
+        ),
+        get_back_keyboard("order_back_to_postal_code"),
+    )
+
+    prompt = await callback.message.answer(
+        "Поделитесь контактом кнопкой ниже или введите номер вручную.",
+        reply_markup=get_contact_keyboard(),
+    )
+
+    await state.set_state(OrderState.waiting_phone)
+    await state.update_data(
+        contact_prompt_message_id=prompt.message_id,
+        contact_keyboard_active=True,
+        phone=None,
+        phone_normalized=None,
+    )
+    await callback.answer()
+
+
 @order_router.message(OrderState.waiting_full_name, F.text)
 async def process_full_name(message: types.Message, state: FSMContext):
     full_name = message.text.strip()
@@ -401,7 +531,7 @@ async def process_full_name(message: types.Message, state: FSMContext):
                 "Пожалуйста, укажите корректное ФИО получателя.\n"
                 "Например: Иванов Иван Иванович."
             ),
-            get_back_keyboard(),
+            get_back_keyboard("order_back_to_review"),
         )
         await remove_user_message(message)
         return
@@ -413,12 +543,12 @@ async def process_full_name(message: types.Message, state: FSMContext):
         message.bot,
         chat_id,
         message_id,
-        (
-            "<strong>Шаг 2 из 3</strong>\n\n"
-            "Введите почтовый индекс (5–6 цифр)."
-        ),
-        get_back_keyboard(),
-    )
+            (
+                "<strong>Шаг 2 из 3</strong>\n\n"
+                "Введите почтовый индекс (5–6 цифр)."
+            ),
+            get_back_keyboard("order_back_to_full_name"),
+        )
 
     await state.set_state(OrderState.waiting_postal_code)
     await remove_user_message(message)
@@ -437,7 +567,7 @@ async def process_postal_code(message: types.Message, state: FSMContext):
                 "<strong>Шаг 2 из 3</strong>\n\n"
                 "Индекс должен состоять из 5–6 цифр. Попробуйте снова."
             ),
-            get_back_keyboard(),
+            get_back_keyboard("order_back_to_full_name"),
         )
         await remove_user_message(message)
         return
@@ -449,13 +579,13 @@ async def process_postal_code(message: types.Message, state: FSMContext):
         message.bot,
         chat_id,
         message_id,
-        (
-            "<strong>Шаг 3 из 3</strong>\n\n"
-            "Отправьте номер телефона.\n"
-            "Вы можете поделиться контактом кнопкой ниже или ввести номер вручную."
-        ),
-        get_back_keyboard(),
-    )
+            (
+                "<strong>Шаг 3 из 3</strong>\n\n"
+                "Отправьте номер телефона.\n"
+                "Вы можете поделиться контактом кнопкой ниже или ввести номер вручную."
+            ),
+            get_back_keyboard("order_back_to_postal_code"),
+        )
 
     prompt = await message.answer(
         "Поделитесь контактом кнопкой ниже или введите номер вручную.",
@@ -483,7 +613,7 @@ async def finalize_phone_step(message: types.Message, state: FSMContext, phone: 
                 "<strong>Шаг 3 из 3</strong>\n\n"
                 "Не удалось распознать номер телефона. Попробуйте снова."
             ),
-            get_back_keyboard(),
+            get_back_keyboard("order_back_to_postal_code"),
         )
         await remove_user_message(message)
         return
@@ -523,7 +653,7 @@ async def process_contact(message: types.Message, state: FSMContext):
                 "<strong>Шаг 3 из 3</strong>\n\n"
                 "Можно отправлять только свой контакт. Попробуйте снова."
             ),
-            get_back_keyboard(),
+            get_back_keyboard("order_back_to_postal_code"),
         )
         await remove_user_message(message)
         return
