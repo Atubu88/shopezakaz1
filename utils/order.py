@@ -154,14 +154,14 @@ async def ensure_cart_data(
 
 
 def build_admin_notification(order_id: int, customer: CustomerData, cart: CartData) -> str:
-    items_block = "\n".join(f"• {line}" for line in cart.lines) if cart.lines else "—"
+    items_block = "\n".join(f"🛍️ {line}" for line in cart.lines) if cart.lines else "—"
     return (
-        f"Новый заказ №{order_id}\n"
-        f"ФИО: {customer.full_name}\n"
-        f"Индекс: {customer.postal_code}\n"
-        f"Телефон: {customer.phone_for_display}\n\n"
-        f"Товары:\n{items_block}\n\n"
-        f"Итого: {cart.total_text}$"
+        f"📦 <strong>Новый заказ №{order_id}</strong>\n"
+        f"👤 <strong>ФИО:</strong> {customer.full_name}\n"
+        f"📮 <strong>Индекс:</strong> {customer.postal_code}\n"
+        f"📞 <strong>Телефон:</strong> {customer.phone_for_display}\n\n"
+        f"🧾 <strong>Товары:</strong>\n{items_block}\n\n"
+        f"💰 <strong>Итого:</strong> {cart.total_text}$"
     )
 
 
