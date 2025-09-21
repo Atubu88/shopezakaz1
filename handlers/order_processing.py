@@ -86,7 +86,7 @@ def get_back_keyboard(callback_data: str = "order_back_to_cart") -> InlineKeyboa
 
 def get_final_review_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Отправить заказ", callback_data="order_submit")
+    builder.button(text="Подтвердить заказ", callback_data="order_submit")
     builder.button(text="Назад", callback_data="order_back_to_phone")
     builder.button(
         text="На главную 🏠",
