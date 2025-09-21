@@ -28,3 +28,6 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+
+# Environment variables
+.env
