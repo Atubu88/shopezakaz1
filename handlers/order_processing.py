@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import suppress
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -17,7 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.orm_query import orm_get_user_carts
+from database.orm_query import create_order_with_items, orm_get_user_carts
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content
 from kbds.inline import MenuCallBack
@@ -293,6 +294,15 @@ async def start_order(
         return
 
     cart_lines, total = build_cart_summary(carts)
+    cart_items = [
+        {
+            "product_id": cart.product_id,
+            "price": str(_to_decimal(cart.product.price)),
+            "quantity": cart.quantity,
+            "name": cart.product.name,
+        }
+        for cart in carts
+    ]
     total_text = format_money(total)
     caption = build_review_text(cart_lines, total_text)
 
@@ -309,6 +319,7 @@ async def start_order(
         order_chat_id=callback.message.chat.id,
         order_message_id=callback.message.message_id,
         cart_lines=cart_lines,
+        cart_items=cart_items,
         cart_total=total_text,
     )
 
@@ -667,11 +678,80 @@ async def process_manual_phone(message: types.Message, state: FSMContext):
 
 
 @order_router.callback_query(OrderState.confirm, F.data == "order_submit")
-async def submit_order(callback: types.CallbackQuery, state: FSMContext):
+async def submit_order(
+    callback: types.CallbackQuery, state: FSMContext, session: AsyncSession
+):
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer()
+        return
+
     data = await state.get_data()
+
+    full_name = (data.get("full_name") or "").strip()
+    postal_code = (data.get("postal_code") or "").strip()
+    phone_display = (data.get("phone") or "").strip()
+    phone_value = (data.get("phone_normalized") or phone_display).strip()
+
+    cart_items: list[dict] = data.get("cart_items") or []
+    cart_lines_display: list[str] = data.get("cart_lines", [])
+    total_text = data.get("cart_total")
+
+    if not cart_items or not cart_lines_display or total_text is None:
+        carts = await orm_get_user_carts(session, callback.from_user.id)
+        if not carts:
+            await callback.answer("Ваша корзина пуста.", show_alert=True)
+            return
+        cart_lines_display, total = build_cart_summary(carts)
+        cart_items = [
+            {
+                "product_id": cart.product_id,
+                "price": str(_to_decimal(cart.product.price)),
+                "quantity": cart.quantity,
+                "name": cart.product.name,
+            }
+            for cart in carts
+        ]
+        total_text = format_money(total)
+
+    if not full_name or not postal_code or not phone_value:
+        await callback.answer(
+            "Не хватает данных для оформления заказа. Попробуйте снова.",
+            show_alert=True,
+        )
+        return
+
     chat_id, message_id = await get_message_context(state)
 
-    text = completion_text(data)
+    total_decimal = Decimal(total_text) if total_text is not None else Decimal("0")
+    if total_text is None:
+        total_text = format_money(total_decimal)
+
+    try:
+        order = await create_order_with_items(
+            session,
+            user_id=callback.from_user.id,
+            full_name=full_name,
+            postal_code=postal_code,
+            phone=phone_value,
+            cart_lines=cart_items,
+            total_amount=total_decimal,
+        )
+    except ValueError:
+        await callback.answer("Ваша корзина пуста.", show_alert=True)
+        return
+
+    message_data = dict(data)
+    message_data.update(
+        {
+            "full_name": full_name,
+            "postal_code": postal_code,
+            "phone": phone_display or phone_value,
+            "cart_lines": cart_lines_display,
+            "cart_total": total_text,
+        }
+    )
+
+    text = completion_text(message_data)
 
     await edit_order_message(
         callback.message.bot,
@@ -680,6 +760,29 @@ async def submit_order(callback: types.CallbackQuery, state: FSMContext):
         text,
         get_completed_keyboard(),
     )
+
+    admin_group_id = os.getenv("ADMIN_GROUP_ID")
+    admin_chat_id: int | None = None
+    if admin_group_id:
+        with suppress(ValueError):
+            admin_chat_id = int(admin_group_id)
+
+    if admin_chat_id:
+        items_block = (
+            "\n".join(f"• {line}" for line in cart_lines_display)
+            if cart_lines_display
+            else "—"
+        )
+        admin_message = (
+            f"Новый заказ №{order.id}\n"
+            f"ФИО: {full_name}\n"
+            f"Индекс: {postal_code}\n"
+            f"Телефон: {phone_display or phone_value}\n\n"
+            f"Товары:\n{items_block}\n\n"
+            f"Итого: {total_text}$"
+        )
+        with suppress(TelegramBadRequest):
+            await callback.message.bot.send_message(admin_chat_id, admin_message)
 
     await callback.answer("Заказ отправлен! Мы свяжемся с вами в ближайшее время.")
     await state.clear()
