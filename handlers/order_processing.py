@@ -46,17 +46,25 @@ class OrderState(StatesGroup):
     confirm = State()
 def build_cart_block(lines: list[str]) -> str:
     if not lines:
-        return "Корзина пуста."
-    return "\n".join(f"• {line}" for line in lines)
+        return "🧺 Корзина пуста."
+    formatted_lines: list[str] = []
+    for line in lines:
+        prefix, separator, rest = line.partition(". ")
+        if separator and prefix.isdigit():
+            decorated = f"{prefix}. 🛍️ {rest}"
+        else:
+            decorated = f"🛍️ {line}"
+        formatted_lines.append(f"• {decorated}")
+    return "\n".join(formatted_lines)
 
 
 def build_review_text(cart_lines: list[str], total_text: str) -> str:
     cart_text = build_cart_block(cart_lines)
     return (
-        "<strong>Оформление заказа</strong>\n\n"
-        "Проверьте содержимое корзины перед оформлением.\n\n"
-        f"<strong>Корзина:</strong>\n{cart_text}\n\n"
-        f"<strong>Итого:</strong> {total_text}$\n\n"
+        "🛍️ <strong>Оформление заказа</strong>\n\n"
+        "🔎 Проверьте содержимое корзины перед оформлением.\n\n"
+        f"🧺 <strong>Корзина:</strong>\n{cart_text}\n\n"
+        f"💳 <strong>Итого:</strong> {total_text}$\n\n"
         "Нажмите «Подтвердить», чтобы продолжить, или «Назад», чтобы вернуться."
     )
 
@@ -224,21 +232,22 @@ def order_summary_text(data: dict) -> str:
     phone = data.get("phone") or "—"
 
     return (
-        "<strong>Проверьте данные заказа</strong>\n\n"
-        f"ФИО: {full_name}\n"
-        f"Индекс: {postal_code}\n"
-        f"Телефон: {phone}\n\n"
-        f"<strong>Корзина:</strong>\n{cart_block}\n\n"
-        f"<strong>Итого:</strong> {total}$"
+        "🔎 <strong>Проверьте данные заказа</strong>\n\n"
+        f"👤 <strong>ФИО:</strong> {full_name}\n"
+        f"📮 <strong>Индекс:</strong> {postal_code}\n"
+        f"📞 <strong>Телефон:</strong> {phone}\n\n"
+        f"🧺 <strong>Корзина:</strong>\n{cart_block}\n\n"
+        f"💰 <strong>Итого:</strong> {total}$"
     )
 
 
 def completion_text(data: dict) -> str:
     summary = order_summary_text(data)
     return (
-        "<strong>Заказ оформлен!</strong>\n\n"
+        "🎉 <strong>Заказ оформлен!</strong>\n\n"
         f"{summary}\n\n"
-        "Наш менеджер свяжется с вами для подтверждения."
+        "🤝 Наш менеджер свяжется с вами для подтверждения.\n"
+        "Спасибо, что выбрали нас! 💚"
     )
 
 
