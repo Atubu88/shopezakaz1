@@ -1,9 +1,11 @@
 import math
+from decimal import Decimal
+
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from database.models import Banner, Cart, Category, Product, User
+from database.models import Banner, Cart, Category, Order, OrderItem, Product, User
 
 # Простой пагинатор
 class Paginator:
@@ -248,4 +250,51 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
         await session.commit()
         return False
 
+
+async def create_order_with_items(
+    session: AsyncSession,
+    user_id: int,
+    full_name: str,
+    postal_code: str,
+    phone: str,
+    cart_lines: list[dict],
+    total_amount: Decimal | float | str,
+) -> Order:
+    if not cart_lines:
+        raise ValueError("Cart is empty, cannot create order.")
+
+    total = Decimal(str(total_amount))
+
+    async with session.begin():
+        order = Order(
+            user_id=user_id,
+            full_name=full_name,
+            postal_code=postal_code,
+            phone=phone,
+            total_amount=total,
+        )
+        session.add(order)
+        await session.flush()
+
+        order_items: list[OrderItem] = []
+        for line in cart_lines:
+            product_id = int(line["product_id"])
+            quantity = int(line["quantity"])
+            price = Decimal(str(line["price"]))
+            order_items.append(
+                OrderItem(
+                    order=order,
+                    product_id=product_id,
+                    price=price,
+                    quantity=quantity,
+                )
+            )
+
+        if order_items:
+            session.add_all(order_items)
+
+        await session.execute(delete(Cart).where(Cart.user_id == user_id))
+
+    await session.refresh(order)
+    return order
 
