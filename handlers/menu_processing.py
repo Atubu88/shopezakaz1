@@ -129,14 +129,22 @@ async def products(session, level, category, page):
 
     product = page_items[0]
 
+    details_line = (
+        f'<a href="{product.details_url}">Подробнее</a>'
+        if getattr(product, "details_url", None)
+        else (product.description or "")
+    )
+    caption_parts = [f"<strong>{product.name}</strong>"]
+    if details_line:
+        caption_parts.append(details_line)
+    caption_parts.append(f"Стоимость: {round(product.price, 2)}")
+    caption_parts.append(
+        f"<strong>Товар {paginator.page} из {paginator.pages}</strong>"
+    )
+
     image = InputMediaPhoto(
         media=product.image,
-        caption=(
-            f"<strong>{product.name}</strong>\n"
-            f"{product.description}\n"
-            f"Стоимость: {round(product.price, 2)}\n"
-            f"<strong>Товар {paginator.page} из {paginator.pages}</strong>"
-        ),
+        caption="\n".join(caption_parts),
     )
 
     pagination_btns = pages(paginator)
