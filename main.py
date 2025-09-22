@@ -1,6 +1,6 @@
 import asyncio
 import os
-
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -8,6 +8,11 @@ from aiogram.client.default import DefaultBotProperties
 from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv())
+
+logging.basicConfig(
+    level=logging.DEBUG if os.getenv("DEBUG", "0") == "1" else logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 from middlewares.db import DataBaseSession
 from database.engine import create_db, drop_db, session_maker
