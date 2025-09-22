@@ -135,6 +135,7 @@ async def orm_add_product(session: AsyncSession, data: dict):
     obj = Product(
         name=data["name"],
         description=data["description"],
+        details_url=data.get("details_url"),
         price=float(data["price"]),
         image=data["image"],
         category_id=int(data["category"]),
@@ -162,6 +163,7 @@ async def orm_update_product(session: AsyncSession, product_id: int, data):
         .values(
             name=data["name"],
             description=data["description"],
+            details_url=data.get("details_url"),
             price=float(data["price"]),
             image=data["image"],
             category_id=int(data["category"]),

@@ -28,12 +28,19 @@ async def show_categories(callback: types.CallbackQuery, session: AsyncSession):
 async def show_products(callback: types.CallbackQuery, session: AsyncSession):
     category_id = callback.data.split("_")[-1]
     for product in await orm_get_products(session, int(category_id)):
+        details_line = (
+            f'<a href="{product.details_url}">Подробнее</a>'
+            if getattr(product, "details_url", None)
+            else (product.description or "")
+        )
+        caption_lines = [f"<strong>{product.name}</strong>"]
+        if details_line:
+            caption_lines.append(details_line)
+        caption_lines.append(f"Стоимость: {round(product.price, 2)}")
+
         await callback.message.answer_photo(
             product.image,
-            caption=(
-                f"<strong>{product.name}</strong>\n"
-                f"{product.description}\nСтоимость: {round(product.price, 2)}"
-            ),
+            caption="\n".join(caption_lines),
             reply_markup=get_callback_btns(
                 btns={
                     "Удалить": f"delete_{product.id}",

@@ -12,6 +12,7 @@ from database.orm_query import (
     orm_update_product,
 )
 from kbds.inline import get_callback_btns
+from utils.telegraph import TelegraphError, create_telegraph_page
 
 from .common import edit_or_send_message, get_admin_main_keyboard
 
@@ -112,15 +113,36 @@ async def add_name_invalid(message: types.Message, state: FSMContext):
 async def add_description(
     message: types.Message, state: FSMContext, session: AsyncSession
 ):
+    data = await state.get_data()
+
     if message.text == "." and AddProduct.product_for_change:
-        await state.update_data(description=AddProduct.product_for_change.description)
+        await state.update_data(
+            description=AddProduct.product_for_change.description,
+            details_url=getattr(AddProduct.product_for_change, "details_url", None),
+        )
     else:
-        if 4 >= len(message.text):
+        content = message.html_text or message.text or ""
+        if len(content.strip()) <= 4:
             await message.answer(
                 "Слишком короткое описание. \n Введите заново"
             )
             return
-        await state.update_data(description=message.text)
+
+        title = data.get("name") or (
+            AddProduct.product_for_change.name
+            if AddProduct.product_for_change
+            else "Описание товара"
+        )
+        try:
+            details_url = await create_telegraph_page(title, content)
+        except TelegraphError as exc:
+            await message.answer(
+                f"Не удалось создать страницу в Telegraph: {exc}"
+            )
+            return
+
+        link = f'<a href="{details_url}">Подробнее</a>'
+        await state.update_data(description=link, details_url=details_url)
 
     categories = await orm_get_categories(session)
     btns = {category.name: str(category.id) for category in categories}
