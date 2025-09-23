@@ -208,6 +208,27 @@ async def orm_add_user(
         await session.commit()
 
 
+async def orm_update_user_admin_status(
+    session: AsyncSession,
+    user_id: int,
+    is_admin: bool,
+    *,
+    first_name: str | None = None,
+    last_name: str | None = None,
+) -> bool:
+    values: dict[str, object] = {"is_admin": is_admin}
+    if first_name is not None:
+        values["first_name"] = first_name
+    if last_name is not None:
+        values["last_name"] = last_name
+
+    result = await session.execute(
+        update(User).where(User.user_id == user_id).values(**values)
+    )
+    await session.commit()
+    return result.rowcount > 0
+
+
 ######################## Работа с корзинами #######################################
 
 async def orm_add_to_cart(session: AsyncSession, user_id: int, product_id: int):
