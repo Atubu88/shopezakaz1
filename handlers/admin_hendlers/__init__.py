@@ -10,6 +10,7 @@ from .banner import register_banner_handlers
 from .catalog import register_catalog_handlers
 from .category import register_category_handlers
 from .common import send_admin_menu
+from .group_admins import group_admin_router
 
 admin_router = Router()
 admin_router.message.filter(ChatTypeFilter(["private"]), IsAdmin())
@@ -40,3 +41,5 @@ register_add_product_handlers(admin_router)
 register_catalog_handlers(admin_router)
 register_category_handlers(admin_router)
 register_banner_handlers(admin_router)
+
+__all__ = ("admin_router", "group_admin_router")
