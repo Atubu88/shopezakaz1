@@ -7,10 +7,22 @@ from typing import Awaitable, Callable, Mapping, Sequence
 from utils.money import format_money, to_decimal
 
 
+def _parse_float(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass(slots=True)
 class CustomerData:
     full_name: str
     postal_code: str
+    address: str
+    lat: float | None
+    lon: float | None
     phone_display: str
     phone_value: str
 
@@ -18,18 +30,27 @@ class CustomerData:
     def from_state(cls, data: Mapping[str, object]) -> "CustomerData":
         full_name = str(data.get("full_name") or "").strip()
         postal_code = str(data.get("postal_code") or "").strip()
+        address = str(data.get("address") or "").strip()
+        lat = _parse_float(data.get("lat"))
+        lon = _parse_float(data.get("lon"))
         phone_display = str(data.get("phone") or "").strip()
         phone_normalized = str(data.get("phone_normalized") or "").strip()
         phone_value = phone_normalized or phone_display
-        return cls(full_name, postal_code, phone_display, phone_value)
+        return cls(full_name, postal_code, address, lat, lon, phone_display, phone_value)
 
     @property
     def is_complete(self) -> bool:
-        return all((self.full_name, self.postal_code, self.phone_value))
+        return all((self.full_name, self.postal_code, self.address, self.phone_value))
 
     @property
     def phone_for_display(self) -> str:
         return self.phone_display or self.phone_value
+
+    @property
+    def coordinates_for_display(self) -> str | None:
+        if self.lat is None or self.lon is None:
+            return None
+        return f"{self.lat:.5f}, {self.lon:.5f}"
 
 
 @dataclass(slots=True)
@@ -155,10 +176,15 @@ async def ensure_cart_data(
 
 def build_admin_notification(order_id: int, customer: CustomerData, cart: CartData) -> str:
     items_block = "\n".join(f"🛍️ {line}" for line in cart.lines) if cart.lines else "—"
+    address = customer.address or "—"
+    coords = customer.coordinates_for_display
+    coords_line = f"🗺️ <strong>Координаты:</strong> {coords}\n" if coords else ""
     return (
         f"📦 <strong>Новый заказ №{order_id}</strong>\n"
         f"👤 <strong>ФИО:</strong> {customer.full_name}\n"
+        f"📍 <strong>Адрес:</strong> {address}\n"
         f"📮 <strong>Индекс:</strong> {customer.postal_code}\n"
+        f"{coords_line}"
         f"📞 <strong>Телефон:</strong> {customer.phone_for_display}\n\n"
         f"🧾 <strong>Товары:</strong>\n{items_block}\n\n"
         f"💰 <strong>Итого:</strong> {cart.total_text}$"
@@ -173,6 +199,9 @@ def prepare_summary_payload(
         {
             "full_name": customer.full_name,
             "postal_code": customer.postal_code,
+            "address": customer.address,
+            "lat": customer.lat,
+            "lon": customer.lon,
             "phone": customer.phone_for_display,
             "cart_lines": cart.lines_for_display(),
             "cart_total": cart.total_text,

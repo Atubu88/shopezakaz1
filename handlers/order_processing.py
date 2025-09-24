@@ -21,6 +21,7 @@ from database.orm_query import create_order_with_items, orm_get_user_carts
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content
 from kbds.inline import MenuCallBack
+from utils import get_address_from_coords, prettify_address
 from utils.order import (
     CartData,
     CustomerData,
@@ -42,8 +43,12 @@ class OrderState(StatesGroup):
     review = State()
     waiting_full_name = State()
     waiting_postal_code = State()
+    waiting_address = State()
     waiting_phone = State()
     confirm = State()
+
+
+MANUAL_ADDRESS_BUTTON_TEXT = "✏️ Ввести адрес вручную"
 def build_cart_block(lines: list[str]) -> str:
     if not lines:
         return "🧺 Корзина пуста."
@@ -119,6 +124,26 @@ def get_contact_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def get_location_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📍 Отправить геолокацию", request_location=True)],
+            [KeyboardButton(text=MANUAL_ADDRESS_BUTTON_TEXT)],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+        selective=True,
+    )
+
+
+def get_address_confirmation_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Подтвердить адрес", callback_data="order_confirm_address")
+    builder.button(text="Назад", callback_data="order_back_to_postal_code")
+    builder.adjust(1, 1)
+    return builder.as_markup()
+
+
 def is_valid_full_name(full_name: str) -> bool:
     parts = [part for part in full_name.replace("\xa0", " ").split() if part]
     return len(parts) >= 2
@@ -186,6 +211,27 @@ async def cleanup_contact_state(
             pass
 
 
+async def cleanup_location_state(
+    bot: Bot, chat_id: int, data: dict
+) -> None:
+    prompt_id = data.get("location_prompt_message_id")
+    if prompt_id:
+        with suppress(TelegramBadRequest):
+            await bot.delete_message(chat_id, prompt_id)
+
+    if data.get("location_keyboard_active"):
+        try:
+            removal = await bot.send_message(
+                chat_id,
+                ".",
+                reply_markup=ReplyKeyboardRemove(),
+            )
+            with suppress(TelegramBadRequest):
+                await bot.delete_message(chat_id, removal.message_id)
+        except TelegramBadRequest:
+            pass
+
+
 
 
 async def edit_order_message(
@@ -223,18 +269,68 @@ async def remove_user_message(message: types.Message) -> None:
         await message.delete()
 
 
+def build_address_confirmation_text(address: str) -> str:
+    return (
+        "<strong>Шаг 3 из 4</strong>\n\n"
+        "Определённый адрес:\n"
+        f"📍 {address}\n\n"
+        "Подтвердите его или введите новый вручную."
+    )
+
+
+async def show_address_confirmation(bot: Bot, state: FSMContext, address: str) -> None:
+    chat_id, message_id = await get_message_context(state)
+    await edit_order_message(
+        bot,
+        chat_id,
+        message_id,
+        build_address_confirmation_text(address),
+        get_address_confirmation_keyboard(),
+    )
+
+
+async def show_postal_code_step(bot: Bot, state: FSMContext) -> None:
+    chat_id, message_id = await get_message_context(state)
+    await edit_order_message(
+        bot,
+        chat_id,
+        message_id,
+        (
+            "<strong>Шаг 2 из 4</strong>\n\n"
+            "Введите почтовый индекс (5–6 цифр)."
+        ),
+        get_back_keyboard("order_back_to_full_name"),
+    )
+
+
 def order_summary_text(data: dict) -> str:
     cart_lines: list[str] = data.get("cart_lines", [])
     cart_block = build_cart_block(cart_lines)
     total = data.get("cart_total", "0")
     full_name = data.get("full_name") or "—"
     postal_code = data.get("postal_code") or "—"
+    address = data.get("address") or "—"
     phone = data.get("phone") or "—"
+
+    lat_value = data.get("lat")
+    lon_value = data.get("lon")
+    coords_line = ""
+    try:
+        lat_float = float(lat_value)
+        lon_float = float(lon_value)
+    except (TypeError, ValueError):
+        lat_float = lon_float = None
+    if lat_float is not None and lon_float is not None:
+        coords_line = (
+            f"🗺️ <strong>Координаты:</strong> {lat_float:.5f}, {lon_float:.5f}\n"
+        )
 
     return (
         "🔎 <strong>Проверьте данные заказа</strong>\n\n"
         f"👤 <strong>ФИО:</strong> {full_name}\n"
+        f"📍 <strong>Адрес:</strong> {address}\n"
         f"📮 <strong>Индекс:</strong> {postal_code}\n"
+        f"{coords_line if coords_line else ''}"
         f"📞 <strong>Телефон:</strong> {phone}\n\n"
         f"🧺 <strong>Корзина:</strong>\n{cart_block}\n\n"
         f"💰 <strong>Итого:</strong> {total}$"
@@ -270,6 +366,7 @@ async def start_order(
 
     data = await state.get_data()
     await cleanup_contact_state(callback.message.bot, callback.message.chat.id, data)
+    await cleanup_location_state(callback.message.bot, callback.message.chat.id, data)
     await state.clear()
 
     carts = await orm_get_user_carts(session, callback.from_user.id)
@@ -307,7 +404,7 @@ async def start_order(
 async def confirm_cart(callback: types.CallbackQuery, state: FSMContext):
     chat_id, message_id = await get_message_context(state)
     text = (
-        "<strong>Шаг 1 из 3</strong>\n\n"
+        "<strong>Шаг 1 из 4</strong>\n\n"
         "Введите ФИО получателя.\n"
         "Например: Иванов Иван Иванович."
     )
@@ -348,6 +445,11 @@ async def back_to_review(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(
         full_name=None,
         postal_code=None,
+        address=None,
+        lat=None,
+        lon=None,
+        location_prompt_message_id=None,
+        location_keyboard_active=False,
         phone=None,
         phone_normalized=None,
     )
@@ -364,6 +466,7 @@ async def return_to_cart(
 
     data = await state.get_data()
     await cleanup_contact_state(callback.message.bot, callback.message.chat.id, data)
+    await cleanup_location_state(callback.message.bot, callback.message.chat.id, data)
     await state.clear()
 
     media, reply_markup = await get_menu_content(
@@ -421,7 +524,7 @@ async def back_to_full_name(callback: types.CallbackQuery, state: FSMContext):
         chat_id,
         message_id,
         (
-            "<strong>Шаг 1 из 3</strong>\n\n"
+            "<strong>Шаг 1 из 4</strong>\n\n"
             "Введите ФИО получателя.\n"
             "Например: Иванов Иван Иванович."
         ),
@@ -431,9 +534,37 @@ async def back_to_full_name(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(OrderState.waiting_full_name)
     await state.update_data(
         postal_code=None,
+        address=None,
+        lat=None,
+        lon=None,
+        location_prompt_message_id=None,
+        location_keyboard_active=False,
         phone=None,
         phone_normalized=None,
     )
+    await callback.answer()
+
+
+@order_router.callback_query(OrderState.waiting_address, F.data == "order_back_to_postal_code")
+async def back_to_postal_code_from_address(
+    callback: types.CallbackQuery, state: FSMContext
+):
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    await cleanup_location_state(callback.message.bot, callback.message.chat.id, data)
+    await state.update_data(
+        location_keyboard_active=False,
+        location_prompt_message_id=None,
+        address=None,
+        lat=None,
+        lon=None,
+    )
+
+    await show_postal_code_step(callback.message.bot, state)
+    await state.set_state(OrderState.waiting_postal_code)
     await callback.answer()
 
 
@@ -445,24 +576,20 @@ async def back_to_postal_code(callback: types.CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
     await cleanup_contact_state(callback.message.bot, callback.message.chat.id, data)
+    await cleanup_location_state(callback.message.bot, callback.message.chat.id, data)
     await state.update_data(
         contact_keyboard_active=False,
         contact_prompt_message_id=None,
+        location_keyboard_active=False,
+        location_prompt_message_id=None,
+        address=None,
+        lat=None,
+        lon=None,
         phone=None,
         phone_normalized=None,
     )
 
-    chat_id, message_id = await get_message_context(state)
-    await edit_order_message(
-        callback.message.bot,
-        chat_id,
-        message_id,
-        (
-            "<strong>Шаг 2 из 3</strong>\n\n"
-            "Введите почтовый индекс (5–6 цифр)."
-        ),
-        get_back_keyboard("order_back_to_full_name"),
-    )
+    await show_postal_code_step(callback.message.bot, state)
 
     await state.set_state(OrderState.waiting_postal_code)
     await callback.answer()
@@ -483,7 +610,7 @@ async def back_to_phone(callback: types.CallbackQuery, state: FSMContext):
         chat_id,
         message_id,
         (
-            "<strong>Шаг 3 из 3</strong>\n\n"
+            "<strong>Шаг 4 из 4</strong>\n\n"
             "Отправьте номер телефона.\n"
             "Вы можете поделиться контактом кнопкой ниже или ввести номер вручную."
         ),
@@ -515,7 +642,7 @@ async def process_full_name(message: types.Message, state: FSMContext):
             chat_id,
             message_id,
             (
-                "<strong>Шаг 1 из 3</strong>\n\n"
+                "<strong>Шаг 1 из 4</strong>\n\n"
                 "Пожалуйста, укажите корректное ФИО получателя.\n"
                 "Например: Иванов Иван Иванович."
             ),
@@ -531,12 +658,12 @@ async def process_full_name(message: types.Message, state: FSMContext):
         message.bot,
         chat_id,
         message_id,
-            (
-                "<strong>Шаг 2 из 3</strong>\n\n"
-                "Введите почтовый индекс (5–6 цифр)."
-            ),
-            get_back_keyboard("order_back_to_full_name"),
-        )
+        (
+            "<strong>Шаг 2 из 4</strong>\n\n"
+            "Введите почтовый индекс (5–6 цифр)."
+        ),
+        get_back_keyboard("order_back_to_full_name"),
+    )
 
     await state.set_state(OrderState.waiting_postal_code)
     await remove_user_message(message)
@@ -552,7 +679,7 @@ async def process_postal_code(message: types.Message, state: FSMContext):
             chat_id,
             message_id,
             (
-                "<strong>Шаг 2 из 3</strong>\n\n"
+                "<strong>Шаг 2 из 4</strong>\n\n"
                 "Индекс должен состоять из 5–6 цифр. Попробуйте снова."
             ),
             get_back_keyboard("order_back_to_full_name"),
@@ -560,22 +687,127 @@ async def process_postal_code(message: types.Message, state: FSMContext):
         await remove_user_message(message)
         return
 
-    await state.update_data(postal_code=postal_code)
+    await state.update_data(
+        postal_code=postal_code,
+        address=None,
+        lat=None,
+        lon=None,
+    )
     chat_id, message_id = await get_message_context(state)
 
     await edit_order_message(
         message.bot,
         chat_id,
         message_id,
-            (
-                "<strong>Шаг 3 из 3</strong>\n\n"
-                "Отправьте номер телефона.\n"
-                "Вы можете поделиться контактом кнопкой ниже или ввести номер вручную."
-            ),
-            get_back_keyboard("order_back_to_postal_code"),
-        )
+        (
+            "<strong>Шаг 3 из 4</strong>\n\n"
+            "Отправьте геолокацию кнопкой ниже или введите адрес вручную."
+        ),
+        get_back_keyboard("order_back_to_postal_code"),
+    )
 
     prompt = await message.answer(
+        "Поделитесь геолокацией кнопкой ниже или отправьте адрес текстом.",
+        reply_markup=get_location_keyboard(),
+    )
+
+    await state.set_state(OrderState.waiting_address)
+    await state.update_data(
+        location_prompt_message_id=prompt.message_id,
+        location_keyboard_active=True,
+    )
+
+    await remove_user_message(message)
+
+
+@order_router.message(OrderState.waiting_address, F.location)
+async def process_location(message: types.Message, state: FSMContext):
+    location = message.location
+    if location is None:
+        await remove_user_message(message)
+        return
+
+    lat = float(location.latitude)
+    lon = float(location.longitude)
+
+    try:
+        raw_address = await get_address_from_coords(lat, lon)
+    except Exception:
+        raw_address = None
+
+    if raw_address:
+        address = prettify_address(raw_address)
+    else:
+        address = prettify_address(f"{lat:.6f}, {lon:.6f}")
+
+    await state.update_data(address=address, lat=lat, lon=lon)
+    await show_address_confirmation(message.bot, state, address)
+    await remove_user_message(message)
+
+
+@order_router.message(OrderState.waiting_address, F.text)
+async def process_manual_address(message: types.Message, state: FSMContext):
+    raw_text = (message.text or "").strip()
+    if not raw_text:
+        await remove_user_message(message)
+        return
+
+    if raw_text == MANUAL_ADDRESS_BUTTON_TEXT:
+        data = await state.get_data()
+        prompt_id = data.get("location_prompt_message_id")
+        if prompt_id:
+            with suppress(TelegramBadRequest):
+                await message.bot.delete_message(message.chat.id, prompt_id)
+
+        prompt = await message.answer(
+            "Пожалуйста, укажите адрес вручную сообщением.",
+            reply_markup=get_location_keyboard(),
+        )
+        await state.update_data(
+            location_prompt_message_id=prompt.message_id,
+            location_keyboard_active=True,
+        )
+        await remove_user_message(message)
+        return
+
+    address = prettify_address(raw_text)
+    await state.update_data(address=address, lat=None, lon=None)
+    await show_address_confirmation(message.bot, state, address)
+    await remove_user_message(message)
+
+
+@order_router.callback_query(OrderState.waiting_address, F.data == "order_confirm_address")
+async def confirm_address(callback: types.CallbackQuery, state: FSMContext):
+    if not callback.message or callback.message.chat.type != "private":
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    address = data.get("address")
+    if not address:
+        await callback.answer("Сначала отправьте адрес.", show_alert=True)
+        return
+
+    await cleanup_location_state(callback.message.bot, callback.message.chat.id, data)
+    await state.update_data(
+        location_keyboard_active=False,
+        location_prompt_message_id=None,
+    )
+
+    chat_id, message_id = await get_message_context(state)
+    await edit_order_message(
+        callback.message.bot,
+        chat_id,
+        message_id,
+        (
+            "<strong>Шаг 4 из 4</strong>\n\n"
+            "Отправьте номер телефона.\n"
+            "Вы можете поделиться контактом кнопкой ниже или ввести номер вручную."
+        ),
+        get_back_keyboard("order_back_to_postal_code"),
+    )
+
+    prompt = await callback.message.answer(
         "Поделитесь контактом кнопкой ниже или введите номер вручную.",
         reply_markup=get_contact_keyboard(),
     )
@@ -584,9 +816,10 @@ async def process_postal_code(message: types.Message, state: FSMContext):
     await state.update_data(
         contact_prompt_message_id=prompt.message_id,
         contact_keyboard_active=True,
+        phone=None,
+        phone_normalized=None,
     )
-
-    await remove_user_message(message)
+    await callback.answer()
 
 
 async def finalize_phone_step(message: types.Message, state: FSMContext, phone: str) -> None:
@@ -598,7 +831,7 @@ async def finalize_phone_step(message: types.Message, state: FSMContext, phone: 
             chat_id,
             message_id,
             (
-                "<strong>Шаг 3 из 3</strong>\n\n"
+                "<strong>Шаг 4 из 4</strong>\n\n"
                 "Не удалось распознать номер телефона. Попробуйте снова."
             ),
             get_back_keyboard("order_back_to_postal_code"),
@@ -638,7 +871,7 @@ async def process_contact(message: types.Message, state: FSMContext):
             chat_id,
             message_id,
             (
-                "<strong>Шаг 3 из 3</strong>\n\n"
+                "<strong>Шаг 4 из 4</strong>\n\n"
                 "Можно отправлять только свой контакт. Попробуйте снова."
             ),
             get_back_keyboard("order_back_to_postal_code"),
@@ -686,6 +919,9 @@ async def submit_order(
             user_id=callback.from_user.id,
             full_name=customer.full_name,
             postal_code=customer.postal_code,
+            address=customer.address,
+            lat=customer.lat,
+            lon=customer.lon,
             phone=customer.phone_value,
             cart_lines=cart_data.items_payload,
             total_amount=cart_data.total,
