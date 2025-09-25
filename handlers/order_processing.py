@@ -23,6 +23,7 @@ from handlers.menu_processing import get_menu_content
 from kbds.inline import MenuCallBack
 from utils import get_address_from_coords, prettify_address
 from utils.order import (
+    CURRENCY_SYMBOL,
     CartData,
     CustomerData,
     build_admin_notification,
@@ -69,7 +70,7 @@ def build_review_text(cart_lines: list[str], total_text: str) -> str:
         "🛍️ <strong>Оформление заказа</strong>\n\n"
         "🔎 Проверьте содержимое корзины перед оформлением.\n\n"
         f"🧺 <strong>Корзина:</strong>\n{cart_text}\n\n"
-        f"💳 <strong>Итого:</strong> {total_text}$\n\n"
+        f"💳 <strong>Итого:</strong> {total_text} {CURRENCY_SYMBOL}\n\n"
         "Нажмите «Подтвердить», чтобы продолжить, или «Назад», чтобы вернуться."
     )
 
@@ -312,28 +313,14 @@ def order_summary_text(data: dict) -> str:
     address = data.get("address") or "—"
     phone = data.get("phone") or "—"
 
-    lat_value = data.get("lat")
-    lon_value = data.get("lon")
-    coords_line = ""
-    try:
-        lat_float = float(lat_value)
-        lon_float = float(lon_value)
-    except (TypeError, ValueError):
-        lat_float = lon_float = None
-    if lat_float is not None and lon_float is not None:
-        coords_line = (
-            f"🗺️ <strong>Координаты:</strong> {lat_float:.5f}, {lon_float:.5f}\n"
-        )
-
     return (
         "🔎 <strong>Проверьте данные заказа</strong>\n\n"
         f"👤 <strong>ФИО:</strong> {full_name}\n"
         f"📍 <strong>Адрес:</strong> {address}\n"
         f"📮 <strong>Индекс:</strong> {postal_code}\n"
-        f"{coords_line if coords_line else ''}"
         f"📞 <strong>Телефон:</strong> {phone}\n\n"
         f"🧺 <strong>Корзина:</strong>\n{cart_block}\n\n"
-        f"💰 <strong>Итого:</strong> {total}$"
+        f"💰 <strong>Итого:</strong> {total} {CURRENCY_SYMBOL}"
     )
 
 

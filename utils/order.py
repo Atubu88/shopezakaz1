@@ -7,6 +7,9 @@ from typing import Awaitable, Callable, Mapping, Sequence
 from utils.money import format_money, to_decimal
 
 
+CURRENCY_SYMBOL = "₽"
+
+
 def _parse_float(value: object) -> float | None:
     try:
         if value is None:
@@ -131,8 +134,8 @@ class CartData:
             name = str(cart.product.name)
             lines.append(
                 (
-                    f"{idx}. {name} — {format_money(price)}$ "
-                    f"× {quantity} = {format_money(subtotal)}$"
+                    f"{idx}. {name} — {format_money(price)} {CURRENCY_SYMBOL} "
+                    f"× {quantity} = {format_money(subtotal)} {CURRENCY_SYMBOL}"
                 )
             )
             items.append(
@@ -187,7 +190,7 @@ def build_admin_notification(order_id: int, customer: CustomerData, cart: CartDa
         f"{coords_line}"
         f"📞 <strong>Телефон:</strong> {customer.phone_for_display}\n\n"
         f"🧾 <strong>Товары:</strong>\n{items_block}\n\n"
-        f"💰 <strong>Итого:</strong> {cart.total_text}$"
+        f"💰 <strong>Итого:</strong> {cart.total_text} {CURRENCY_SYMBOL}"
     )
 
 
