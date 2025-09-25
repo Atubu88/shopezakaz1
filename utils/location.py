@@ -37,10 +37,14 @@ async def get_address_from_coords(lat: float, lon: float) -> str | None:
         return None
     display = data.get("display_name") or data.get("name")
     if isinstance(display, str) and display.strip():
-        return display
+        preferred = _build_preferred_address(data.get("address"))
+        return preferred or display
 
     address = data.get("address")
     if isinstance(address, dict):
+        preferred = _build_preferred_address(address)
+        if preferred:
+            return preferred
         parts = [str(value).strip() for value in address.values() if str(value).strip()]
         if parts:
             return ", ".join(parts)
@@ -74,3 +78,62 @@ def prettify_address(raw: str) -> str:
         compact = compact[:117].rstrip(", ") + "..."
 
     return compact
+
+
+def _build_preferred_address(address: Any) -> str | None:
+    if not isinstance(address, dict):
+        return None
+
+    def _first(*keys: str) -> str | None:
+        for key in keys:
+            value = address.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    street = _first(
+        "road",
+        "pedestrian",
+        "footway",
+        "street",
+        "residential",
+        "path",
+        "cycleway",
+        "service",
+    )
+    house_number = address.get("house_number")
+    if isinstance(house_number, str):
+        house_number = house_number.strip()
+    else:
+        house_number = None
+    if street and house_number:
+        street = f"{street} {house_number}"
+    elif house_number and not street:
+        street = house_number
+
+    district = _first(
+        "neighbourhood",
+        "quarter",
+        "suburb",
+        "city_district",
+        "district",
+        "borough",
+        "residential",
+    )
+
+    city = _first("city", "town", "village", "municipality", "hamlet", "county")
+
+    state = _first("state", "region", "state_district", "province", "territory")
+
+    postcode = _first("postcode")
+    country = _first("country")
+
+    components: list[str] = []
+    for part in (street, district, city, state, postcode, country):
+        if part and part not in components:
+            components.append(part)
+
+    if components:
+        return ", ".join(components)
+
+    return None
