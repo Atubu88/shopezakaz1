@@ -4,11 +4,12 @@ from aiogram.exceptions import TelegramBadRequest
 from kbds.inline import get_callback_btns
 
 ADMIN_MAIN_BTNS = {
-    "Добавить товар": "admin_add_product",
-    "Ассортимент": "admin_catalog",
-    "Категории": "admin_category",
-    "Добавить/Изменить баннер": "admin_banner",
+    "➕ Добавить товар": "admin_add_product",
+    "📦 Ассортимент": "admin_catalog",
+    "📂 Категории": "admin_category",
+    "🖼️ Добавить/Изменить баннер": "admin_banner",
 }
+
 
 CATEGORY_MENU_BTNS = {
     "Добавить категорию": "admin_add_category",
@@ -27,7 +28,7 @@ def get_category_menu_keyboard() -> types.InlineKeyboardMarkup:
 
 
 def get_menu_text() -> str:
-    return "Что хотите сделать?"
+    return "⚙️ Админ-панель открыта. Что сделаем?"
 
 
 def get_category_menu_text() -> str:
