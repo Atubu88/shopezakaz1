@@ -19,6 +19,8 @@ from kbds.inline import (
 )
 from utils.paginator import Paginator
 from aiogram.types import InputMediaPhoto, FSInputFile
+from utils.money import format_money
+from utils.order import CURRENCY_SYMBOL
 
 
 BANNERS_DIR = Path(__file__).resolve().parents[1] / "banners"
@@ -137,7 +139,9 @@ async def products(session, level, category, page):
     caption_parts = [f"<strong>{product.name}</strong>"]
     if details_line:
         caption_parts.append(details_line)
-    caption_parts.append(f"Стоимость: {round(product.price, 2)}")
+    caption_parts.append(
+        f"Стоимость: {format_money(product.price)} {CURRENCY_SYMBOL}"
+    )
     caption_parts.append(
         f"<strong>Товар {paginator.page} из {paginator.pages}</strong>"
     )
@@ -179,16 +183,19 @@ async def carts(session, level, menu_name, page, user_id, product_id):
         paginator = Paginator(carts, page=page)
         cart = paginator.get_page()[0]
 
-        cart_price = round(cart.quantity * cart.product.price, 2)
-        total_price = round(sum(c.quantity * c.product.price for c in carts), 2)
+        cart_price = format_money(cart.quantity * cart.product.price)
+        total_price = format_money(
+            sum(c.quantity * c.product.price for c in carts)
+        )
+        product_price = format_money(cart.product.price)
 
         image = InputMediaPhoto(
             media=cart.product.image,
             caption=(
                 f"<strong>{cart.product.name}</strong>\n"
-                f"{cart.product.price}$ x {cart.quantity} = {cart_price}$\n"
+                f"{product_price} {CURRENCY_SYMBOL} x {cart.quantity} = {cart_price} {CURRENCY_SYMBOL}\n"
                 f"Товар {paginator.page} из {paginator.pages} в корзине.\n"
-                f"Общая стоимость товаров в корзине {total_price}$"
+                f"Общая стоимость товаров в корзине {total_price} {CURRENCY_SYMBOL}"
             ),
         )
 
