@@ -3,7 +3,7 @@ from typing import List
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text, BigInteger, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
+from datetime import datetime
 
 class Base(DeclarativeBase):
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
@@ -53,6 +53,12 @@ class User(Base):
 
     orders: Mapped[List['Order']] = relationship(back_populates='user')
 
+    # 🔹 Все заказы, где этот пользователь был реферером
+    ref_orders: Mapped[List['Order']] = relationship(
+        back_populates='referrer',
+        foreign_keys="Order.referrer_id"
+    )
+
 
 class Cart(Base):
     __tablename__ = 'cart'
@@ -70,7 +76,10 @@ class Order(Base):
     __tablename__ = 'order'
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey('user.user_id', ondelete='CASCADE'), nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey('user.user_id', ondelete='CASCADE'),
+        nullable=False
+    )
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     postal_code: Mapped[str] = mapped_column(String(20), nullable=False)
     address: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -80,9 +89,30 @@ class Order(Base):
     total_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(String(50), default='pending', nullable=False)
 
+    # 🔹 Платёжные поля
+    transaction_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    payment_status: Mapped[str] = mapped_column(
+        String(20), default="pending", nullable=False
+    )  # pending / paid / failed
+    paid_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # 🔹 Партнёрские поля
+    referrer_id: Mapped[int | None] = mapped_column(ForeignKey('user.user_id'), nullable=True)
+    bonus_awarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    bonus_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+
+    # 🔹 Связи
     user: Mapped['User'] = relationship(back_populates='orders')
     items: Mapped[List['OrderItem']] = relationship(
-        back_populates='order', cascade='all, delete-orphan'
+        back_populates='order',
+        cascade='all, delete-orphan'
+    )
+    referrer: Mapped['User'] = relationship(
+        foreign_keys=[referrer_id],
+        back_populates='ref_orders'
     )
 
 
